@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Well-being エリア分析ダッシュボード</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", "Hiragino Sans", "Meiryo", sans-serif; background:#f5f7fa; color:#222; }
+  .layout { display:flex; min-height:100vh; }
+  .sidebar { width:280px; background:#1f2937; color:#fff; padding:20px; }
+  .sidebar h2 { font-size:16px; margin:0 0 16px; border-bottom:1px solid #374151; padding-bottom:8px; }
+  .sidebar label { display:block; font-size:12px; margin:12px 0 4px; color:#cbd5e1; }
+  .sidebar select { width:100%; padding:6px; border-radius:4px; border:1px solid #4b5563; background:#111827; color:#fff; }
+  .sidebar .status { margin-top:20px; font-size:12px; padding:8px; background:#111827; border-radius:4px; line-height:1.6; }
+  .status .ok { color:#34d399; }
+  .status .ng { color:#f87171; }
+  .main { flex:1; padding:24px; }
+  .steps { display:flex; gap:8px; margin-bottom:20px; }
+  .step { flex:1; padding:10px; text-align:center; background:#e5e7eb; border-radius:4px; font-size:13px; color:#6b7280; }
+  .step.active { background:#2563eb; color:#fff; font-weight:bold; }
+  .step.done { background:#10b981; color:#fff; }
+  .panel { background:#fff; border-radius:8px; padding:20px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  .panel h3 { margin-top:0; }
+  table { width:100%; border-collapse:collapse; margin-top:12px; font-size:13px; }
+  th, td { padding:8px 10px; border-bottom:1px solid #e5e7eb; text-align:left; }
+  th { background:#f9fafb; }
+  tr.selectable { cursor:pointer; }
+  tr.selectable:hover { background:#eff6ff; }
+  tr.selected { background:#dbeafe !important; }
+  .btn { padding:8px 18px; border:none; border-radius:4px; background:#2563eb; color:#fff; cursor:pointer; font-size:14px; }
+  .btn:disabled { background:#9ca3af; cursor:not-allowed; }
+  .btn.back { background:#6b7280; }
+  .actions { margin-top:16px; display:flex; gap:8px; justify-content:flex-end; }
+  .s3grid { display:grid; grid-template-columns: 1fr 1fr; gap:20px; }
+  .card { background:#f9fafb; border-radius:6px; padding:14px; }
+  .card h4 { margin:0 0 10px; font-size:14px; }
+  .muted { color:#6b7280; font-size:12px; }
+  .badge { display:inline-block; padding:2px 8px; background:#dbeafe; color:#1e40af; border-radius:10px; font-size:11px; margin-left:6px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <h2>フィルタ設定</h2>
+
+    <label for="fIssue">① 顧客課題（Issue）</label>
+    <select id="fIssue"><option value="">-- 選択してください --</option></select>
+
+    <label for="fTarget">② ターゲット（Target）</label>
+    <select id="fTarget"><option value="">-- 選択してください --</option></select>
+
+    <div class="status" id="statusBox">
+      <div>データ状態:</div>
+      <div id="statMart" class="ng">・mart: 未読込</div>
+      <div id="statIssue" class="ng">・issue: 未読込</div>
+      <div id="statFilter" class="ng">・フィルタ: 未設定</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="steps">
+      <div class="step active" id="stepTab1">Step1: エリア選択</div>
+      <div class="step" id="stepTab2">Step2: 確認</div>
+      <div class="step" id="stepTab3">Step3: Well-being分析</div>
+    </div>
+
+    <!-- Step1 -->
+    <section class="panel" id="step1">
+      <h3>Step1. 対象エリアを選択</h3>
+      <p class="muted">サイドバーで「顧客課題」と「ターゲット」を選択すると、エリア一覧が絞り込まれます。行をクリックしてエリアを1つ選び、「次へ」を押してください。</p>
+      <div id="areaTableWrap"><p class="muted">フィルタ未設定です。</p></div>
+      <div class="actions">
+        <button class="btn" id="btnTo2" disabled>次へ</button>
+      </div>
+    </section>
+
+    <!-- Step2 -->
+    <section class="panel" id="step2" style="display:none;">
+      <h3>Step2. 選択内容の確認</h3>
+      <div id="confirmBox"></div>
+      <div class="actions">
+        <button class="btn back" id="btnBack2">戻る</button>
+        <button class="btn" id="btnTo3">分析を実行</button>
+      </div>
+    </section>
+
+    <!-- Step3 -->
+    <section class="panel" id="step3" style="display:none;">
+      <h3>Step3. Well-being 分析結果</h3>
+      <div class="s3grid">
+        <div class="card">
+          <h4>Well-being インデックス（重み付きスコア）<span class="badge">weight 加味</span></h4>
+          <canvas id="wbChart" height="260"></canvas>
+          <p class="muted">※ 各 WB インデックスに紐づく指標について、normalized_score × weight の平均値を表示しています。</p>
+        </div>
+        <div class="card">
+          <h4>指標別 詳細スコア <span class="badge">weight なし</span></h4>
+          <p class="muted" id="drillGuide">左のグラフでバーをクリックすると、その Well-being インデックスに含まれる個別指標のスコア（比重なし）が表示されます。</p>
+          <canvas id="detailChart" height="260"></canvas>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn back" id="btnBack3">戻る</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* =========================================================
+   Well-being エリア分析ダッシュボード
+   要件:
+   1) master_issue.json から Issue を選ばせ、index_code をフィルタ
+   2) mart_index_normalized.json から Target を選ばせ、target_id をフィルタ
+   3) Step1→2→3 を順に実行
+   4) Step3 左: WB インデックス表示は weight を掛けたスコアを使用
+      Step3 右: 個別指標の詳細は weight を掛けない normalized_score を使用
+   ========================================================= */
+
+const state = {
+  martData: [],
+  issueData: [],
+  issueList: [],            // [{id,name,codes:Set}]
+  allTargets: [],           // [{id,name}]
+  selectedIssue: '',
+  selectedTargetId: '',
+  allowedIdxCodes: null,    // null なら全許可、Set の場合はそれで絞る
+  filteredMart: [],         // issue & target 適用済みデータ
+  wbList: [],               // WB インデックス名の一覧
+  wbAvg: {},                // { wb_index: 重み付き平均スコア }
+  wbCodes: {},              // { wb_index: Set(index_code) }
+  areaList: [],             // Step1 で表示するエリア一覧
+  selectedArea: null,
+  wbChart: null,
+  detailChart: null
+};
+
+/* -------------- 初期化 -------------- */
+async function init(){
+  try{
+    const [mart, issue] = await Promise.all([
+      fetch('mart_index_normalized.json').then(r=>r.json()),
+      fetch('master_issue.json').then(r=>r.json())
+    ]);
+    state.martData = mart;
+    state.issueData = issue;
+    document.getElementById('statMart').innerHTML = '・mart: <span class="ok">読込OK ('+mart.length+'件)</span>';
+    document.getElementById('statIssue').innerHTML = '・issue: <span class="ok">読込OK ('+issue.length+'件)</span>';
+  }catch(e){
+    alert('データ読み込みエラー: '+e.message);
+    return;
+  }
+
+  // Issue リスト作成（issue_id ごとに紐づく index_code を集約）
+  const issueSet = {};
+  state.issueData.forEach(r=>{
+    if(!issueSet[r.issue_id]){
+      issueSet[r.issue_id] = { id:r.issue_id, name:r.issue_name, codes:new Set() };
+    }
+    issueSet[r.issue_id].codes.add(r.index_code);
+  });
+  state.issueList = Object.values(issueSet).sort((a,b)=>a.name.localeCompare(b.name,'ja'));
+
+  // Target リスト作成
+  const tSet = {};
+  state.martData.forEach(r=>{
+    if(r.target_id && !tSet[r.target_id]){
+      tSet[r.target_id] = { id:r.target_id, name:r.target_name };
+    }
+  });
+  state.allTargets = Object.values(tSet).sort((a,b)=>a.name.localeCompare(b.name,'ja'));
+
+  // Issue select 生成
+  const fIssue = document.getElementById('fIssue');
+  state.issueList.forEach(it=>{
+    const o = document.createElement('option');
+    o.value = it.id; o.textContent = it.name;
+    fIssue.appendChild(o);
+  });
+  fIssue.addEventListener('change', onIssueChange);
+
+  // Target select 生成
+  const fTarget = document.getElementById('fTarget');
+  state.allTargets.forEach(t=>{
+    const o = document.createElement('option');
+    o.value = t.id; o.textContent = t.name;
+    fTarget.appendChild(o);
+  });
+  fTarget.addEventListener('change', onTargetChange);
+
+  rebuildFiltered();
+  updateStatus();
+
+  // ボタン
+  document.getElementById('btnTo2').addEventListener('click', ()=>goStep(2));
+  document.getElementById('btnBack2').addEventListener('click', ()=>goStep(1));
+  document.getElementById('btnTo3').addEventListener('click', ()=>goStep(3));
+  document.getElementById('btnBack3').addEventListener('click', ()=>goStep(2));
+}
+
+/* -------------- フィルタ変更ハンドラ -------------- */
+function onIssueChange(e){
+  state.selectedIssue = e.target.value;
+  if(state.selectedIssue){
+    const iss = state.issueList.find(x=>x.id===state.selectedIssue);
+    state.allowedIdxCodes = iss ? iss.codes : null;
+  }else{
+    state.allowedIdxCodes = null;
+  }
+  rebuildFiltered();
+  updateStatus();
+  refreshCurrentStep();
+}
+function onTargetChange(e){
+  state.selectedTargetId = e.target.value;
+  rebuildFiltered();
+  updateStatus();
+  refreshCurrentStep();
+}
+
+/* -------------- フィルタ適用 & WB 再集計 -------------- */
+function rebuildFiltered(){
+  state.filteredMart = state.martData.filter(r=>{
+    if(state.allowedIdxCodes && !state.allowedIdxCodes.has(r.index_code)) return false;
+    if(state.selectedTargetId && r.target_id !== state.selectedTargetId) return false;
+    return true;
+  });
+  rebuildWB();
+  rebuildAreaList();
+}
+
+function rebuildWB(){
+  // 重み付き平均：wb_index ごとに sum(score*weight)/count
+  const agg = {};    // wb_index -> {sum, cnt, codes:Set}
+  state.filteredMart.forEach(r=>{
+    const wb = r.wb_index;
+    if(!wb) return;
+    if(!agg[wb]) agg[wb] = { sum:0, cnt:0, codes:new Set() };
+    const w = (r.weight!=null) ? r.weight : 1;
+    agg[wb].sum += (r.normalized_score||0) * w;
+    agg[wb].cnt += 1;
+    agg[wb].codes.add(r.index_code);
+  });
+  state.wbAvg = {};
+  state.wbCodes = {};
+  state.wbList = Object.keys(agg).sort();
+  state.wbList.forEach(wb=>{
+    state.wbAvg[wb] = agg[wb].cnt>0 ? (agg[wb].sum/agg[wb].cnt) : 0;
+    state.wbCodes[wb] = agg[wb].codes;
+  });
+}
+
+function rebuildAreaList(){
+  // area_id 単位で集約
+  const m = {};
+  state.filteredMart.forEach(r=>{
+    if(!m[r.area_id]){
+      m[r.area_id] = {
+        area_id:r.area_id, area_name:r.area_name,
+        prefecture:r.prefecture, region:r.region,
+        area_type:r.area_type, sum:0, cnt:0
+      };
+    }
+    m[r.area_id].sum += (r.normalized_score||0);
+    m[r.area_id].cnt += 1;
+  });
+  state.areaList = Object.values(m).map(a=>({
+    ...a, avg: a.cnt>0 ? a.sum/a.cnt : 0
+  })).sort((a,b)=>b.avg-a.avg);
+}
+
+/* -------------- ステータス表示 -------------- */
+function updateStatus(){
+  const filterOK = state.selectedIssue && state.selectedTargetId;
+  const el = document.getElementById('statFilter');
+  if(filterOK){
+    el.innerHTML = '・フィルタ: <span class="ok">設定済み（対象'+state.filteredMart.length+'件）</span>';
+  }else{
+    el.innerHTML = '・フィルタ: <span class="ng">Issue と Target を選択してください</span>';
+  }
+}
+
+/* -------------- Step 遷移 -------------- */
+function goStep(n){
+  ['step1','step2','step3'].forEach((id,i)=>{
+    document.getElementById(id).style.display = (i===n-1)?'':'none';
+    const tab = document.getElementById('stepTab'+(i+1));
+    tab.classList.remove('active','done');
+    if(i+1===n) tab.classList.add('active');
+    else if(i+1<n) tab.classList.add('done');
+  });
+  if(n===1) buildS1();
+  if(n===2) buildS2();
+  if(n===3) buildS3();
+}
+function refreshCurrentStep(){
+  if(document.getElementById('step1').style.display!=='none') buildS1();
+  else if(document.getElementById('step2').style.display!=='none') buildS2();
+  else if(document.getElementById('step3').style.display!=='none') buildS3();
+}
+
+/* -------------- Step1: エリア選択 -------------- */
+function buildS1(){
+  const wrap = document.getElementById('areaTableWrap');
+  const btn = document.getElementById('btnTo2');
+  if(!state.selectedIssue || !state.selectedTargetId){
+    wrap.innerHTML = '<p class="muted">サイドバーで「顧客課題」「ターゲット」の両方を選択してください。</p>';
+    btn.disabled = true;
+    return;
+  }
+  if(state.areaList.length===0){
+    wrap.innerHTML = '<p class="muted">該当エリアが見つかりません。</p>';
+    btn.disabled = true;
+    return;
+  }
+  let html = '<table><thead><tr><th>順位</th><th>エリア名</th><th>都道府県</th><th>タイプ</th><th style="text-align:right;">平均スコア</th></tr></thead><tbody>';
+  state.areaList.forEach((a,i)=>{
+    const sel = (state.selectedArea && state.selectedArea.area_id===a.area_id) ? 'selected' : '';
+    html += `<tr class="selectable ${sel}" data-id="${a.area_id}">
+      <td>${i+1}</td><td>${a.area_name}</td><td>${a.prefecture||''}</td>
+      <td>${a.area_type||''}</td><td style="text-align:right;">${a.avg.toFixed(2)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('tr.selectable').forEach(tr=>{
+    tr.addEventListener('click', ()=>{
+      const id = tr.getAttribute('data-id');
+      state.selectedArea = state.areaList.find(a=>a.area_id===id);
+      buildS1();
+    });
+  });
+  btn.disabled = !state.selectedArea;
+}
+
+/* -------------- Step2: 確認 -------------- */
+function buildS2(){
+  const box = document.getElementById('confirmBox');
+  const iss = state.issueList.find(x=>x.id===state.selectedIssue);
+  const tgt = state.allTargets.find(x=>x.id===state.selectedTargetId);
+  const a = state.selectedArea;
+  box.innerHTML = `
+    <table>
+      <tr><th style="width:30%;">顧客課題</th><td>${iss?iss.name:'-'}</td></tr>
+      <tr><th>ターゲット</th><td>${tgt?tgt.name:'-'}</td></tr>
+      <tr><th>選択エリア</th><td>${a?a.area_name:'-'} (${a?a.prefecture:''})</td></tr>
+      <tr><th>対象データ件数</th><td>${state.filteredMart.length} 件</td></tr>
+    </table>`;
+}
+
+/* -------------- Step3: WB 分析 -------------- */
+function buildS3(){
+  // 左：WB インデックス（重み付き）
+  const labels = state.wbList;
+  const data = labels.map(wb=>state.wbAvg[wb]);
+  if(state.wbChart) state.wbChart.destroy();
+  const ctx = document.getElementById('wbChart').getContext('2d');
+  state.wbChart = new Chart(ctx, {
+    type:'bar',
+    data:{ labels:labels, datasets:[{ label:'重み付きスコア', data:data, backgroundColor:'#2563eb' }] },
+    options:{
+      indexAxis:'y',
+      responsive:true,
+      onClick:(evt,els)=>{
+        if(els.length>0){
+          const idx = els[0].index;
+          drillDown(labels[idx]);
+        }
+      },
+      plugins:{ legend:{display:false}, title:{display:false} },
+      scales:{ x:{ beginAtZero:true, title:{display:true,text:'重み付き平均スコア'} } }
+    }
+  });
+  // 右側は初期状態ではガイドのみ
+  if(state.detailChart){ state.detailChart.destroy(); state.detailChart=null; }
+  document.getElementById('drillGuide').style.display='';
+}
+
+function drillDown(wb){
+  // 該当 WB に紐づく index_code を持つレコードから、
+  // 個別指標ごとに normalized_score の平均（比重なし）を計算
+  const codes = state.wbCodes[wb];
+  if(!codes){ return; }
+  const per = {};   // index_code -> {name, sum, cnt}
+  state.filteredMart.forEach(r=>{
+    if(r.wb_index!==wb) return;
+    if(!codes.has(r.index_code)) return;
+    if(!per[r.index_code]) per[r.index_code] = { name:r.index_name, sum:0, cnt:0 };
+    per[r.index_code].sum += (r.normalized_score||0);
+    per[r.index_code].cnt += 1;
+  });
+  const arr = Object.values(per).map(x=>({ name:x.name, avg: x.cnt>0 ? x.sum/x.cnt : 0 }))
+                                .sort((a,b)=>b.avg-a.avg);
+  const labels = arr.map(x=>x.name);
+  const data = arr.map(x=>x.avg);
+  document.getElementById('drillGuide').style.display='none';
+  if(state.detailChart) state.detailChart.destroy();
+  const ctx = document.getElementById('detailChart').getContext('2d');
+  state.detailChart = new Chart(ctx, {
+    type:'bar',
+    data:{ labels:labels, datasets:[{ label:wb+' 詳細スコア（比重なし）', data:data, backgroundColor:'#10b981' }] },
+    options:{
+      indexAxis:'y',
+      responsive:true,
+      plugins:{ legend:{display:false}, title:{display:true, text:wb+'（比重なしの normalized_score）'} },
+      scales:{ x:{ beginAtZero:true, title:{display:true,text:'normalized_score 平均'} } }
+    }
+  });
+}
+
+/* -------------- 起動 -------------- */
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
