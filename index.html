@@ -64,11 +64,16 @@
     .tile { border: 2px solid var(--border); border-radius: var(--radius); padding: 20px; background: var(--surface); cursor: pointer; text-align: center; font-size: .95rem; font-weight: 600; color: var(--text2); transition: all .2s; box-shadow: var(--shadow); }
     .tile:hover { border-color: var(--accent); background: var(--accent-light); color: var(--accent); }
     .tile.active { border-color: var(--accent); background: var(--accent); color: #fff; box-shadow: var(--shadow-md); }
-    .step2-tile-row { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items:center; }
-    .step2-tile-row .lbl { font-size:.8rem; color:var(--muted); font-weight:600; margin-right:4px; }
+    /* Target タイル専用カラー（エメラルドグリーン系） */
+    .tile.tile-target:hover { border-color: #10b981; background: #ecfdf5; color: #10b981; }
+    .tile.tile-target.active { border-color: #10b981; background: #10b981; color: #fff; box-shadow: var(--shadow-md); }
+    .step2-tile-row { display: flex; gap: 14px; margin-bottom: 16px; flex-wrap: wrap; align-items:center; }
+    .step2-tile-row .lbl { font-size:.95rem; color:var(--muted); font-weight:600; margin-right:4px; }
     .step2-tile { padding: 8px 20px; border: 2px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; font-size: .82rem; font-weight: 600; color: var(--text2); transition: all .15s; }
     .step2-tile:hover { border-color: var(--accent); color: var(--accent); }
     .step2-tile.active { border-color: var(--accent); background: var(--accent); color: #fff; }
+    /* 並び替えボタンだけ大きく */
+    .step2-tile[data-s2sort] { padding: 12px 28px; font-size: .95rem; border-radius: 10px; }
     .split-layout { display:flex; gap:20px; flex:1; min-height:0; margin-bottom:16px; }
     .split-left { flex:1.2; display:flex; flex-direction:column; min-width:0; height:100%; }
     .split-right { flex:1; display:flex; flex-direction:column; min-width:0; height:100%; }
@@ -335,7 +340,6 @@
   const AGE_KEYS = ['人口_10歳未満','人口_10代','人口_20代','人口_30代','人口_40代','人口_50代','人口_60代','人口_70歳以上'];
   let IND_KEYS = [];
   let wbAvg = {}, wbCodes = {}, wbList = [];
-
   async function init() {
     try {
       const [pR, mR, iR] = await Promise.all([
@@ -362,7 +366,6 @@
       alert('ファイルの読み込みに失敗しました。');
     }
   }
-
   function buildAreaInfo() {
     areaMap = {}; areaInfo = {}; popMap = {}; indexMap = {};
     rawMartData.forEach(r => {
@@ -375,7 +378,6 @@
     popData.forEach(r => { popMap[r.area_id] = r; });
     if (popData.length > 0) IND_KEYS = Object.keys(popData[0]).filter(k => k.startsWith('産業_')).sort();
   }
-
   function buildStep0Tiles() {
     const issues = [...new Map(issueData.map(r => [r.issue_id, r.issue_name])).entries()].map(([id, name]) => ({ id, name }));
     const issueBox = document.getElementById('issueTiles');
@@ -396,7 +398,8 @@
     targetBox.innerHTML = '';
     targetNames.forEach(name => {
       const t = document.createElement('div');
-      t.className = 'tile'; t.textContent = name; t.dataset.targetId = TARGET_NAME_TO_ID[name];
+      // Target タイルは別カラートーン(エメラルドグリーン系)を適用
+      t.className = 'tile tile-target'; t.textContent = name; t.dataset.targetId = TARGET_NAME_TO_ID[name];
       t.addEventListener('click', () => {
         targetBox.querySelectorAll('.tile').forEach(x => x.classList.remove('active'));
         t.classList.add('active');
@@ -482,6 +485,9 @@
         s2A = (col === 'popDiff');
         document.querySelectorAll('[id^="s2_"]').forEach(e => e.textContent = '⇅');
         const el = document.getElementById('s2_' + col); if (el) el.textContent = s2A ? '▲' : '▼';
+        // 並び替え後、上位4件を自動選択（ユーザーは後から変更可）
+        autoSelectTop4();
+        updateS2UI();
         renderS2();
       });
     });
@@ -575,6 +581,18 @@
     if (denom === 0) return 0;
     return Math.min(1, Math.max(-1, dot/denom));
   }
+  // 並び替え後の上位4件を自動選択（ユーザーは後から自由に変更可能）
+  function autoSelectTop4() {
+    if (!s2Rows || s2Rows.length === 0) return;
+    const rows = [...s2Rows];
+    rows.sort((a,b) => {
+      let va=a[s2C], vb=b[s2C];
+      if (typeof va === 'string') return s2A ? va.localeCompare(vb) : vb.localeCompare(va);
+      return s2A ? va-vb : vb-va;
+    });
+    compIds.clear();
+    rows.slice(0, 4).forEach(r => compIds.add(r.id));
+  }
   function buildS2() {
     if (!targetId) { alert('STEP 1で対象エリアを選択してください'); goStep(1); return; }
     document.getElementById('s2tn').textContent = areaMap[targetId];
@@ -582,7 +600,10 @@
     const tp = popMap[targetId];
     if (!tp) {
       s2Rows = Object.entries(areaInfo).filter(([id]) => id !== targetId).map(([id,a]) => ({ id, name: a.name, region: a.region, type: a.type, popDiff: 0, ageSim: 0, indSim: 0 }));
-      renderS2(); updateS2UI(); return;
+      autoSelectTop4();
+      updateS2UI();
+      renderS2();
+      return;
     }
     const tTotal = tp['総人口']||0;
     const tAge = AGE_KEYS.map(k => tp[k]||0);
@@ -599,8 +620,10 @@
         indSim: cosineSimilarity(tInd, IND_KEYS.map(k => r[k]||0))
       });
     });
-    renderS2();
+    // 初期表示時に上位4件を自動選択
+    autoSelectTop4();
     updateS2UI();
+    renderS2();
   }
   function renderS2() {
     const rows = [...s2Rows];
@@ -644,6 +667,9 @@
     document.querySelectorAll('.step2-tile[data-s2sort]').forEach(x => {
       x.classList.toggle('active', x.dataset.s2sort === col);
     });
+    // 並び替え後、上位4件を自動選択（ユーザーは後から変更可）
+    autoSelectTop4();
+    updateS2UI();
     renderS2();
   }
   function toggleS2Selection(id) {
