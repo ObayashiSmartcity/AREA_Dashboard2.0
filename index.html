@@ -253,7 +253,7 @@
           <button class="step2-tile" data-s2sort="indSim">産業構成で選ぶ</button>
         </div>
         <div class="ss">
-          <span>⭐ 対象: <strong id="s2tn">-</strong></span>
+          <span>★ 対象: <strong id="s2tn">-</strong></span>
           <span style="color:var(--muted);">│</span>
           <span>比較: <strong id="s2cn">0</strong> 件</span>
           <div style="flex:1"></div>
@@ -585,7 +585,7 @@
     document.getElementById('stxt').textContent = Object.keys(areaInfo).length + ' エリア / 対象: ' + info.name;
     const tbox = document.getElementById('tbox'); tbox.style.display = 'block';
     const cw = document.getElementById('tchip');
-    cw.innerHTML = '<div class="tchip">⭐ ' + info.name + '<span style="font-weight:400;color:var(--muted);font-size:.75rem;margin-left:4px;">' + id + '</span><span class="rm">✕</span></div>';
+    cw.innerHTML = '<div class="tchip">★ ' + info.name + '<span style="font-weight:400;color:var(--muted);font-size:.75rem;margin-left:4px;">' + id + '</span><span class="rm">✕</span></div>';
     cw.querySelector('.rm').addEventListener('click', (e) => { e.stopPropagation(); clearTarget(); });
     applyFilters();
     updateMap1();
